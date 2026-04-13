@@ -316,6 +316,33 @@ var u2 = r("image/jpeg");
 var h = r("image/png");
 var g = r("image/webp");
 
+// src/logger.ts
+var currentLevel = "info";
+function setLogLevel(level) {
+  currentLevel = level;
+}
+var LEVELS = { debug: 0, info: 1, warn: 2, error: 3 };
+function log(level, msg, data) {
+  if (LEVELS[level] < LEVELS[currentLevel]) return;
+  const entry = { level, msg, ts: (/* @__PURE__ */ new Date()).toISOString(), ...data };
+  if (level === "error") {
+    console.error(JSON.stringify(entry));
+  } else {
+    console.log(JSON.stringify(entry));
+  }
+}
+var logger = {
+  debug: (msg, data) => log("debug", msg, data),
+  info: (msg, data) => log("info", msg, data),
+  warn: (msg, data) => log("warn", msg, data),
+  error: (msg, data) => log("error", msg, data)
+};
+function initLogger(debug) {
+  if (debug === "true") {
+    setLogLevel("debug");
+  }
+}
+
 // src/db/index.ts
 var Dao = class {
   db;
@@ -332,16 +359,18 @@ var Dao = class {
       const raw = await this.db.get(key);
       return loadArrayFromRaw(raw);
     } catch (e2) {
-      console.error(e2);
+      logger.error("KV load failed", { key, operation: "loadArrayFromDB", error: e2.message });
     }
     return [];
   }
   async addAddress(address, type) {
+    logger.debug("KV write", { key: type, operation: "addAddress" });
     const list = await this.loadArrayFromDB(type);
     list.unshift(address);
     await this.db.put(type, JSON.stringify(list));
   }
   async removeAddress(address, type) {
+    logger.debug("KV write", { key: type, operation: "removeAddress" });
     const list = await this.loadArrayFromDB(type);
     const result = list.filter((item) => item !== address);
     await this.db.put(type, JSON.stringify(result));
@@ -356,38 +385,45 @@ var Dao = class {
       try {
         const raw = await this.db.get(id);
         if (raw) {
+          logger.debug("KV load", { key: id, operation: "loadMailStatus", found: true });
           return {
             ...defaultStatus,
             ...JSON.parse(raw)
           };
         }
       } catch (e2) {
-        console.error(e2);
+        logger.error("KV load failed", { key: id, operation: "loadMailStatus", error: e2.message });
       }
     }
+    logger.debug("KV load", { key: id, operation: "loadMailStatus", found: false });
     return defaultStatus;
   }
   async saveMailStatus(id, status, ttl) {
+    logger.debug("KV write", { key: id, operation: "saveMailStatus", ttl });
     await this.db.put(id, JSON.stringify(status), { expirationTtl: ttl });
   }
   async loadMailCache(id) {
     try {
       const raw = await this.db.get(id);
       if (raw) {
+        logger.debug("KV load", { key: id, operation: "loadMailCache", found: true });
         return JSON.parse(raw);
       }
     } catch (e2) {
-      console.error(e2);
+      logger.error("KV load failed", { key: id, operation: "loadMailCache", error: e2.message });
     }
+    logger.debug("KV load", { key: id, operation: "loadMailCache", found: false });
     return null;
   }
   async saveMailCache(id, cache, ttl) {
+    logger.debug("KV write", { key: id, operation: "saveMailCache", ttl });
     await this.db.put(id, JSON.stringify(cache), { expirationTtl: ttl });
   }
   async telegramIDToMailID(id) {
     return await this.db.get(`TelegramID2MailID:${id}`);
   }
   async saveTelegramIDToMailID(id, mailID, ttl) {
+    logger.debug("KV write", { key: `TelegramID2MailID:${id}`, operation: "saveTelegramIDToMailID", ttl });
     await this.db.put(`TelegramID2MailID:${id}`, mailID, { expirationTtl: ttl });
   }
 };
@@ -893,10 +929,12 @@ async function checkAddressStatus(addresses, env) {
       continue;
     }
     if (matchAddress(whiteList, addr)) {
+      logger.info("Address matched whitelist", { address: addr });
       result[addr] = "white";
       continue;
     }
     if (matchAddress(blockList, addr)) {
+      logger.info("Address matched blocklist", { address: addr });
       result[addr] = "block";
       continue;
     }
@@ -913,16 +951,10 @@ async function isMessageBlock(message, env) {
   for (const key in res) {
     switch (res[key]) {
       case "white":
-        console.log(`Matched white list: ${key}`);
+        logger.info("Message allowed by whitelist", { address: key });
         return false;
-      default:
-        break;
-    }
-  }
-  for (const key in res) {
-    switch (res[key]) {
       case "block":
-        console.log(`Matched block list: ${key}`);
+        logger.info("Message blocked by blocklist", { address: key });
         return true;
       default:
         break;
@@ -10404,7 +10436,7 @@ async function telegramCommandHandler(message, env) {
   }
   let [command] = message.text?.split(/ (.*)/) || [""];
   if (!command.startsWith("/")) {
-    console.log(`Invalid command: ${command}`);
+    logger.debug("Invalid command received", { command });
     return;
   }
   command = command.substring(1);
@@ -10435,7 +10467,7 @@ async function telegramCallbackHandler(callback, env) {
   if (!data || !chatId || !messageId) {
     return;
   }
-  console.log(`Received callback: ${JSON.stringify({ data, callbackId, chatId, messageId })}`);
+  logger.info("Telegram callback received", { data, callbackId, chatId, messageId });
   const renderHandlerBuilder = (render2) => {
     return async (arg2) => {
       const value = await dao.loadMailCache(arg2);
@@ -10477,7 +10509,7 @@ async function telegramCallbackHandler(callback, env) {
     }
     return;
   }
-  console.log(`Unknown data: ${data}`);
+  logger.debug("Unknown callback data", { data });
 }
 async function telegramWebhookHandler(req, env) {
   const body = await req.json();
@@ -10538,6 +10570,7 @@ function addressParamsCheck(address, type) {
   return keyMap[type];
 }
 function errorHandler(error) {
+  logger.error("HTTP error", { status: error instanceof HTTPError ? error.status : 500, message: error.message });
   if (error instanceof HTTPError) {
     return new Response(JSON.stringify({
       error: error.message
@@ -10568,6 +10601,7 @@ function createRouter(env) {
     });
   });
   router.get("/init", async () => {
+    logger.info("Init endpoint called");
     const api = createTelegramBotAPI(TELEGRAM_TOKEN);
     const webhook = await api.setWebhook({
       url: `https://${DOMAIN}/telegram/${TELEGRAM_TOKEN}/webhook`
@@ -10605,13 +10639,15 @@ function createRouter(env) {
     return { block, white };
   });
   router.post("/telegram/:token/webhook", async (req) => {
+    logger.info("Telegram webhook received", { tokenPrefix: req.params.token?.slice(0, 8) });
     if (req.params.token !== TELEGRAM_TOKEN) {
+      logger.warn("Invalid telegram token in webhook", { expected: TELEGRAM_TOKEN?.slice(0, 8) });
       throw new HTTPError(403, "Invalid token");
     }
     try {
       await telegramWebhookHandler(req, env);
     } catch (e2) {
-      console.error(e2);
+      logger.error("Telegram webhook handler error", { error: e2.message });
     }
     return { success: true };
   });
@@ -10635,8 +10671,10 @@ function createRouter(env) {
   return router;
 }
 async function fetchHandler(request, env) {
+  logger.info("Incoming request", { method: request.method, path: new URL(request.url).pathname });
   const router = createRouter(env);
   return router.fetch(request).catch((e2) => {
+    logger.error("Unhandled error in fetch handler", { error: e2.message });
     return new Response(JSON.stringify({
       error: e2.message
     }), { status: 500 });
@@ -10695,6 +10733,7 @@ async function sendToWebhook(url, mail, secret, timeoutMs = 5e3) {
     if (!response.ok) {
       throw new Error(`Webhook returned ${response.status}: ${response.statusText}`);
     }
+    logger.info("Webhook sent", { url, mailId: mail.id, subject: mail.subject, status: response.status });
   } finally {
     clearTimeout(timeoutId);
   }
@@ -10715,7 +10754,7 @@ async function sendMailToWebhooks(mail, env, deliveredUrls) {
       await sendToWebhook(url, mail, WEBHOOK_SECRET, timeoutMs);
       newlyDelivered.push(url);
     } catch (e2) {
-      console.error(`Failed to send webhook to ${url}:`, e2);
+      logger.error("Webhook delivery failed", { url, mailId: mail.id, error: e2.message });
     }
   }
   return newlyDelivered;
@@ -10757,7 +10796,17 @@ async function emailHandler(message, env) {
   const blockPolicy = (BLOCK_POLICY || "telegram").split(",");
   const statusTTL = 60 * 60;
   const status = await dao.loadMailStatus(id, isGuardian);
+  logger.info("Email received", {
+    messageId: id,
+    from: message.from,
+    to: message.to,
+    subject: message.headers.get("Subject") || "",
+    isBlock,
+    isGuardian,
+    blockPolicy
+  });
   if (isBlock && blockPolicy.includes("reject")) {
+    logger.info("Email rejected", { messageId: id, reason: "block_policy_reject" });
     message.setReject("Blocked");
     return;
   }
@@ -10771,16 +10820,17 @@ async function emailHandler(message, env) {
           continue;
         }
         await message.forward(add);
+        logger.info("Email forwarded", { messageId: id, forwardTo: add });
         if (isGuardian) {
           status.forward.push(add);
           await dao.saveMailStatus(id, status, statusTTL);
         }
       } catch (e2) {
-        console.error(e2);
+        logger.error("Forward failed", { messageId: id, forwardTo: forward, error: e2.message });
       }
     }
   } catch (e2) {
-    console.error(e2);
+    logger.error("Forward handler error", { messageId: id, error: e2.message });
   }
   let mail = null;
   try {
@@ -10789,21 +10839,23 @@ async function emailHandler(message, env) {
     const maxSizePolicy = MAX_EMAIL_SIZE_POLICY || "truncate";
     mail = await parseEmail(message, maxSize, maxSizePolicy);
     await dao.saveMailCache(mail.id, mail, ttl);
+    logger.info("Email parsed", { messageId: id, mailId: mail.id, subject: mail.subject });
   } catch (e2) {
-    console.error(e2);
+    logger.error("Email parse error", { messageId: id, error: e2.message });
   }
   if (mail) {
     try {
       const blockWebhook = isBlock && blockPolicy.includes("webhook");
       if (!blockWebhook && WEBHOOK_LIST) {
         const newlyDelivered = await sendMailToWebhooks(mail, env, status.webhook);
+        logger.info("Webhooks delivered", { mailId: mail.id, urls: newlyDelivered });
         if (isGuardian && newlyDelivered.length > 0) {
           status.webhook.push(...newlyDelivered);
           await dao.saveMailStatus(id, status, statusTTL);
         }
       }
     } catch (e2) {
-      console.error(e2);
+      logger.error("Webhook handler error", { mailId: mail.id, error: e2.message });
     }
   }
   try {
@@ -10811,6 +10863,7 @@ async function emailHandler(message, env) {
     if (!status.telegram && !blockTelegram && mail) {
       const ttl = Number.parseInt(MAIL_TTL, 10) || 60 * 60 * 24;
       const msgIDs = await sendMailToTelegram(mail, env);
+      logger.info("Telegram message sent", { mailId: mail.id, messageIds: msgIDs });
       for (const msgID of msgIDs) {
         await dao.saveTelegramIDToMailID(`${msgID}`, mail.id, ttl);
       }
@@ -10820,7 +10873,7 @@ async function emailHandler(message, env) {
       await dao.saveMailStatus(id, status, statusTTL);
     }
   } catch (e2) {
-    console.error(e2);
+    logger.error("Telegram handler error", { mailId: mail?.id, error: e2.message });
   }
 }
 
@@ -10863,7 +10916,10 @@ if (typeof Buffer === "undefined") {
 
 // src/index.ts
 var index_default = {
-  fetch: fetchHandler,
+  fetch: (request, env, _ctx) => {
+    initLogger(env.DEBUG);
+    return fetchHandler(request, env);
+  },
   email: emailHandler
 };
 export {
