@@ -1,0 +1,30 @@
+name = "gpt-mail-forward-worker"
+main = "src/index.ts"
+compatibility_date = "2025-09-15"
+compatibility_flags = ["nodejs_compat_v2"]
+
+[ai]
+binding = "AI"
+
+[[kv_namespaces]]
+binding = "DB"
+id = "8ef9225c93db4b5c8d44fa58c69eadd0"
+
+[vars]
+DOMAIN = "gpt-mail-forward-worker.yuanzhisheng.workers.dev"
+TELEGRAM_ID = "-4614036427"
+ALLOWED_USERS = "1878878763"
+TELEGRAM_TOKEN = "7807243917:AAGTEbkDGoQc-uK-WhUUqnrsAJ5gNXd8W8w"
+FORWARD_LIST = ""
+OPENAI_API_KEY = "sk-iK3egGq5xk0Sepnt840e7eFcD93745E4A7526eAcC483Aa65"
+OPENAI_COMPLETIONS_API = "https://api.kksj.org/v1/chat/completions"
+OPENAI_CHAT_MODEL = "gpt-4.1-mini"
+WEBHOOK_LIST = "https://mail-hook.zenkexi.com"
+WEBHOOK_SECRET = "286d00f7-fb69-45c3-af65-e5662494cbfa"
+WEBHOOK_TIMEOUT = "5000"
+GUARDIAN_MODE = "false"
+MAX_EMAIL_SIZE_POLICY = "truncate"
+DEBUG = "false"
+
+[build.env]
+YARN_ENABLE_IMMUTABLE_LOCKFILE = "false"
